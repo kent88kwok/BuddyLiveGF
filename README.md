@@ -18,6 +18,16 @@ BuddyLiveGF 为 macOS 版 WorkBuddy 加入两套动态角色主题，并根据 W
 
 ## 预览
 
+### 深色主题
+
+![BuddyLiveGF 深色沉浸主题](assets/preview-dark.jpg)
+
+### 暖白主题
+
+![BuddyLiveGF 暖白沉浸主题](assets/preview-light.jpg)
+
+### 任务页面
+
 ![沉浸模式](assets/preview-immersive.png)
 
 ![新建任务输入区域](assets/preview-composer.png)
