@@ -53,9 +53,23 @@ BuddyLiveGF 为 WorkBuddy 加入两套动态角色主题，并根据 WorkBuddy �
 
 此外启动器做了**幂等**处理：端口已开直接热附连（对应官方「热切换无需重启」），只有端口未开才带调试端口重启一次。
 
+### 安全与健壮性（参考 Codex-QQ-Skin 上游）
+
+实现后对照同作者的开源皮肤工具 **Codex-QQ-Skin**（`zhulin025/Codex-QQ-Skin`，含真实 CDP 注入源码）做了对齐：
+
+- **严格校验 CDP WebSocket URL**：仅允许回环地址、必须为我们指定的调试端口、禁止任何凭据、路径必须为 `/devtools/page/<id>` —— 杜绝 SSRF / DNS 重绑定式外联。
+- **健壮的 CDP 会话**：`open` 超时 + 逐命令超时 + 解析失败即关闭，避免卡死。
+- **注入后做 DOM 校验**：确认皮肤节点已常驻。
+- **幂等可重复注入**：重新注入前先清理上一代实例，避免叠加。
+- 新增 `--remove`（卸载）、`--watch`（常驻监听新窗口）、`--port`（指定端口）等选项。
+
 详见 [`windows/README.md`](windows/README.md)。
 
 ### 运行（Windows）
+
+**一键方式（推荐）**：从 Release 下载 `BuddyLiveGF.exe`，双击即用（自动检测/开启调试端口并注入，3 秒后自动退出）。皮肤脚本在 WorkBuddy 页面内常驻。
+
+**源码方式**：
 
 ```bash
 cd windows
@@ -64,6 +78,7 @@ node launcher.js   # 首次会重启 WorkBuddy 并注入
 ```
 
 终端命令：`corner` / `immersive`（切换布局）、`theme`（打印当前主题）、`exit`（退出）。
+启动器还支持 `node launcher.js --remove`（卸载）、`--watch`（常驻监听新窗口）、`--port 9223`（指定端口）。
 用 `WORKBUDDY_EXE` 环境变量可指定非标准安装路径的 `WorkBuddy.exe`。
 
 ## 下载与安装（macOS 官方版）

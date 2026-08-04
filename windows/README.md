@@ -7,7 +7,7 @@
 
 ## 工作原理（已对照 WorkBuddy 前端源码核实）
 
-1. **探测即幂等**：若 `127.0.0.1:9222` 已开则「热附连」（不杀进程）；否则以 `--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1` 重启一次。
+1. **探测即幂等**：若 `127.0.0.1:9222`（或 `--port` 指定）已开则「热附连」（不杀进程）；否则以 `--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1` 重启一次。默认回退尝试 `9222/9223/9224`。
 2. 经 CDP 进入 WorkBuddy 渲染进程，注入 `inject/bootstrap.js`：
    - 内置 light / dark 两套皮肤与一个固定定位的角色挂件。
    - **主题检测用 O(1) 属性读取**：WorkBuddy 在 `document.documentElement` 上暴露 `data-vscode-theme-kind`（值 `dark`/`light`）和 `theme-dark`/`theme-light` class（已从 `app.asar` 实测确认）。不调用 `getComputedStyle`，不做亮度计算。
@@ -26,6 +26,33 @@
 | 端口可能绑 `0.0.0.0` | 显式 `--remote-debugging-address=127.0.0.1` | 更安全、少占用 |
 | 呼吸动画用 `width/height/top` | 仅 `transform`/`opacity`（合成线程） | 不触发 layout/paint |
 
+## 安全加固（参考 Codex-QQ-Skin 上游）
+
+本版在实现后对照同作者的另一款开源皮肤工具 **Codex-QQ-Skin**（`zhulin025/Codex-QQ-Skin`，含真实 CDP 注入源码）做了安全与健壮性对齐：
+
+- **严格校验 CDP WebSocket URL**（`validatedDebuggerUrl`）：仅允许回环地址（`127.0.0.1` / `localhost` / `[::1]`）、必须为我们指定的调试端口、禁止任何凭据（`user`/`password`/`search`/`hash`）、路径必须为 `/devtools/page/<id>`。杜绝 SSRF / DNS 重绑定式外联。
+- **仅向合法 WorkBuddy 工作区 page 注入**（`isValidWorkbenchTarget`）：`type==='page'` + 通过上面的 URL 校验，并排除 `devtools` / `extension` / `about:blank` / `webview` 等无关目标。
+- **健壮的 CdpSession**：`open` 超时（5s）+ 逐命令超时（10s）+ 消息解析失败即关闭 + `clean close`，原版无超时，CDP 卡死会拖垮整个进程。
+- **注入后做 DOM 校验**：确认 `#buddylive-gf` 已常驻，给出「已校验 OK / 校验未通过」反馈。
+- **幂等可重复注入**：`inject/bootstrap.js` 在重新注入前先清理上一代实例（断开旧 observer、移除旧 style/widget），避免叠加。
+- **状态文件**：`%APPDATA%/BuddyLiveGF/state.json` 记录端口 / pid / 注入时间，便于排查与自动化。
+
+## 用法
+
+```bash
+# 源码方式
+cd windows
+npm install          # 仅需 ws 依赖
+node launcher.js     # 首次会重启 WorkBuddy 并注入；之后进入交互（corner/immersive/theme/exit）
+node launcher.js --remove   # 卸载皮肤
+node launcher.js --watch    # 常驻：自动注入日后新开的工作区窗口
+node launcher.js --port 9223  # 指定调试端口
+
+# 一键方式（推荐）：直接用仓库 Release 里的 BuddyLiveGF.exe，双击即用
+```
+
+> 用 `WORKBUDDY_EXE` 环境变量可指定非标准安装路径的 `WorkBuddy.exe`。
+
 ## 为什么 Mac 版不能直接在 Windows 跑
 
 Mac 版只是把「启动器 + 菜单栏 UI + 打包」做成 macOS 原生（`.app` / `NSStatusItem` / AppleScript）。
@@ -38,22 +65,6 @@ Mac 版只是把「启动器 + 菜单栏 UI + 打包」做成 macOS 原生（`.a
 | AppleScript 进程控制 | `taskkill /IM WorkBuddy.exe` + Win32 API |
 | `.app` + ad-hoc 签名 | `.exe`/NSIS +（可选）Win 代码签名 |
 
-## 运行
-
-```bash
-cd BuddyLiveGF-Windows
-npm install        # 仅需 ws 依赖
-node launcher.js   # 首次会重启 WorkBuddy 并注入
-```
-
-启动后在终端输入命令（正式版应换成托盘菜单）：
-
-- `corner` / `immersive` —— 切换布局
-- `theme` —— 打印当前检测到的主题（true=深色）
-- `exit` —— 退出
-
-> 用 `WORKBUDDY_EXE` 环境变量可指定非标准安装路径的 `WorkBuddy.exe`。
-
 ## 换成你自己的「女友」美术
 
 编辑 `inject/bootstrap.js` 里的 `CSS`（已合并为单段静态样式）：
@@ -64,7 +75,7 @@ node launcher.js   # 首次会重启 WorkBuddy 并注入
 ## 已知注意点（真实移植时要验证）
 
 - **调试端口绑定**：已显式 `--remote-debugging-address=127.0.0.1` 收紧到回环；若你的构建不支持该 flag，用防火墙规则限制 9222 仅本地。
-- **目标选择**：`/json` 可能返回多个 `page` 目标（主工作区、扩展宿主等）。`launcher.js` 的 `isWorkbench()` 已排除 devtools/extension/about:blank；生产版应精确匹配工作区窗口 URL。
+- **目标选择**：`/json` 可能返回多个 `page` 目标（主工作区、扩展宿主等）。`launcher.js` 的 `isValidWorkbenchTarget()` 在 URL 严格校验（仅回环 + 指定端口 + 无凭据 + `/devtools/page/<id>` 路径）之外，额外排除 `devtools` / `extension` / `about:blank` / `webview`，仅向合法工作区 page 注入。
 - **注入时机**：`Page.addScriptToEvaluateOnNewDocument` 只对后续导航生效，故同时用 `Runtime.evaluate` 立即执行一次当前文档。
 - **持久化**：重启 WorkBuddy 后需重新注入；正式版可在启动时自动挂载，或做成「开机自启 + 监听 WorkBuddy 进程」的服务。
 - **源码现状**：官方仓库的 GitHub「Source code」包仅含 README + 预览图，真实逻辑在编译好的 `.app`/`.exe` 中（未开源）。本骨架为原理一致的独立重实现。

@@ -1,15 +1,28 @@
 // BuddyLiveGF 注入脚本（在 WorkBuddy 渲染进程内运行）
-// 性能要点：
+// 性能要点（不变）：
 //  1) 静态 CSS 只注入一次；主题切换仅翻转 widget 的 class，绝不重写 <style>（避免 CSS 重解析）。
 //  2) 主题检测用 O(1) 属性读取（data-vscode-theme-kind / theme-dark），不调用 getComputedStyle。
 //  3) MutationObserver 用 rAF 合并、并做主题去重：没变就不碰 DOM。
 //  4) 回调只改 widget 自身，绝不修改被观察的 documentElement，避免自触发死循环。
+//
+// 健壮性（参考 Codex-QQ-Skin 上游）：
+//  - 幂等：重新注入时先清理上一代实例（断开旧 observer、移除旧 style/widget），避免叠加。
+//  - 暴露 window.__buddylive.remove()，供 --remove 卸载。
+//
 // 注意：本文件被 launcher 以字符串形式 eval 注入，禁止使用 Node API，只能使用浏览器全局。
 (function () {
-  if (window.__buddylive) return; // 已注入则跳过
-
   const STYLE_ID = 'buddylive-style';
   const WIDGET_ID = 'buddylive-gf';
+
+  // 清理上一代实例，保证可重复注入 / 热切换
+  const prev = window.__buddylive;
+  if (prev && prev._observer && prev._observer.disconnect) {
+    try { prev._observer.disconnect(); } catch (e) {}
+  }
+  const oldStyle = document.getElementById(STYLE_ID);
+  if (oldStyle) oldStyle.remove();
+  const oldWidget = document.getElementById(WIDGET_ID);
+  if (oldWidget) oldWidget.remove();
 
   // 静态 CSS：主题差异全部用 .theme-dark / .theme-light 选择器表达，
   // 因此切主题 = 改 widget 的一个 class，CSS 引擎只做增量匹配，不重新解析整段样式。
@@ -27,8 +40,8 @@
 #buddylive-gf.layout-immersive{background:radial-gradient(circle at 82% 90%,rgba(255,225,235,.28),transparent 60%);}
 #buddylive-gf.theme-dark.layout-immersive{background:radial-gradient(circle at 82% 90%,rgba(120,60,200,.28),transparent 60%);}
 /* 暖白女友 / 赛博女友：emoji 占位，后续替换为真实美术（建议内联 SVG，体积小、可 GPU 合成）*/
-#buddylive-gf .avatar::before{content:"\1F90D";}            /* 🤍 */
-#buddylive-gf.theme-dark .avatar::before{content:"\1F49C";} /* 💜 */
+#buddylive-gf .avatar::before{content:"\u{1F90D}";}            /* 暖白女友 🤍 */
+#buddylive-gf.theme-dark .avatar::before{content:"\u{1F49C}";} /* 赛博女友 💜 */
 /* 仅用 transform/opacity 的轻微呼吸动画，跑在合成线程，不触发 layout/paint */
 @keyframes blgf-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
 #buddylive-gf .avatar{animation:blgf-breathe 4s ease-in-out infinite;}
@@ -78,7 +91,7 @@
       const a = document.createElement('div');
       a.className = 'avatar';
       w.appendChild(a);
-      document.body.appendChild(w);
+      (document.body || document.documentElement).appendChild(w);
     }
     render();
   }
@@ -90,6 +103,13 @@
     if (w && lastTheme != null) w.className = 'buddylive-gf layout-' + layout + ' theme-' + lastTheme;
   }
 
+  function remove() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    if (obs && obs.disconnect) obs.disconnect();
+    const s = document.getElementById(STYLE_ID); if (s) s.remove();
+    const w = document.getElementById(WIDGET_ID); if (w) w.remove();
+  }
+
   // 只观察 documentElement 的 class / 主题属性；回调里从不修改 documentElement 自身
   const obs = new MutationObserver(scheduleRender);
   obs.observe(document.documentElement, {
@@ -97,7 +117,7 @@
     attributeFilter: ['class', 'data-vscode-theme-kind'],
   });
 
-  window.__buddylive = { apply, setLayout, detectDark };
+  window.__buddylive = { apply, setLayout, detectDark, remove, _observer: obs, _installed: true };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply);
   else apply();
 })();
