@@ -1,0 +1,12 @@
+{
+  "name": "buddylivegf-windows",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BuddyLiveGF Windows PoC - WorkBuddy dynamic skin injector via CDP loopback",
+  "scripts": {
+    "start": "node launcher.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
